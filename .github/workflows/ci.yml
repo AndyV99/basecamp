@@ -1,0 +1,78 @@
+name: CI
+
+# PR-time quality gate. Grows job by job as the repo does; every job added here
+# must also be added to the `ci` aggregate's `needs`, or it cannot block a merge.
+#
+# No trigger-level `paths:` filter, deliberately: a workflow skipped by a path
+# filter never reports, and a required check that never reports blocks the PR
+# forever. The single required status check is `ci`, which always runs.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Nothing here needs more than a read of the checkout, and no secrets are
+# referenced, so the workflow runs unchanged on a fork PR.
+permissions:
+  contents: read
+
+# A PR's newer push supersedes its older run. A push to main is keyed by its own
+# run id, so it never cancels another main run (a cancelled run on a merge
+# commit leaves main without a result).
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  secret-scan:
+    name: secret-scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history. A shallow clone gives gitleaks one commit to scan and
+          # it reports clean without having looked at anything else.
+          fetch-depth: 0
+      # Through the same pinned script as the pre-commit hook, so hook and CI
+      # can never be running different gitleaks builds or rulesets.
+      # --redact keeps matched values out of a public, retained build log.
+      - name: gitleaks (full history)
+        run: ./scripts/gitleaks.sh git --no-banner --redact --verbose .
+
+  terraform-fmt:
+    name: terraform-fmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.16.4
+          terraform_wrapper: false
+      # Passes trivially while the repo has no .tf files. That is intended: the
+      # gate exists before the first module does, so the first module cannot
+      # arrive unformatted.
+      - name: terraform fmt -check
+        run: terraform fmt -check -recursive -diff
+
+  # The one job to mark as required in branch protection. `if: always()` means it
+  # reports on every PR; `skipped` upstream results count as success, and only
+  # `failure` or `cancelled` fail it.
+  ci:
+    name: ci
+    needs: [secret-scan, terraform-fmt]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check upstream job results
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "upstream results: $RESULTS"
+          if ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}; then
+            echo '::error title=CI failed::At least one upstream job failed or was cancelled.'
+            exit 1
+          fi
+          echo 'All applicable jobs passed.'

@@ -1,0 +1,44 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan*
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+# Variable files can hold real values. Commit only the example.
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+# .terraform.lock.hcl IS committed: it pins provider checksums.
+
+# Cluster credentials. Never commit these, in any form.
+kubeconfig
+kubeconfig*
+*.kubeconfig
+# SOPS age identities (private keys). Encrypted *.sops.yaml files are fine;
+# the key that decrypts them is not.
+*.agekey
+age.key
+keys.txt
+# Decrypted SOPS output, if anyone ever writes it to disk.
+*.dec.yaml
+*.decrypted.*
+# cloudflared tunnel credentials JSON
+*.cf-tunnel.json
+.cloudflared/
+
+# Local env
+.env
+.env.*
+!.env.example
+
+# Tooling / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/

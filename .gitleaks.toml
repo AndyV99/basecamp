@@ -1,0 +1,101 @@
+# gitleaks configuration for Basecamp.
+#
+# One config, used by both `.github/workflows/ci.yml` and the pre-commit hook in
+# `.githooks/pre-commit`. Both run through `scripts/gitleaks.sh`, which injects
+# this file, so local and CI cannot disagree about what counts as a leak.
+#
+# Run it yourself:
+#   scripts/gitleaks.sh git --no-banner .          # full history
+#   scripts/gitleaks.sh dir --no-banner .          # working tree only
+#
+# Adapted from CollabBoard's config (AndyV99/collabboard, .gitleaks.toml), which
+# carries the longer reasoning behind the value-scoped allowlist policy.
+
+[extend]
+# Start from gitleaks' bundled ruleset. It is maintained upstream as new
+# credential formats appear; the rules below cover only the shapes this repo
+# handles that the bundle was *measured* not to catch.
+useDefault = true
+
+# ---------------------------------------------------------------------------
+# Repo-specific rules
+#
+# Each one exists because a planted fake credential of that shape went
+# undetected by the default ruleset (gitleaks v8.30.1, 2026-09-29). The same
+# drill runs on every PR as scripts/test-gitleaks-rules.sh, so a rule that
+# stops firing fails CI rather than going quiet.
+#
+# Shapes the default ruleset DID catch in that drill, and which therefore have
+# no rule here: SOPS age private keys (`age-secret-key`), AWS access keys,
+# Grafana Cloud tokens, kubeconfig client keys (decoded from base64 by
+# `private-key`). A SOPS-*encrypted* file raised nothing, which is the
+# false-positive check that matters most in a GitOps repo full of them.
+# ---------------------------------------------------------------------------
+
+# Every example written in this file uses a `<placeholder>` in the secret
+# position so the file is clean under its own rules, rather than relying on
+# gitleaks skipping files named .gitleaks.toml (undocumented behaviour).
+
+# Datastore URL with the password inline: `postgres://user:<password>@host/db`.
+# The bundled `generic-api-key` rule keys off an identifier like
+# secret/token/password, and a URL has none. CNPG and Valkey connection strings
+# are the most likely thing to be pasted into a runbook or a values file here.
+# No entropy floor on purpose: human-chosen passwords are low entropy.
+[[rules]]
+id = "basecamp-datastore-url-inline-credential"
+description = "Datastore connection URL with an inline password (postgres/postgresql/redis/rediss)"
+regex = '''(?i)\b(postgres(?:ql)?|rediss?)://([^\s:/?#@"'\x60]*):([^\s/?#@"'\x60]+)@([^\s/?#@"'\x60]+)'''
+secretGroup = 3
+keywords = ["postgres://", "postgresql://", "redis://", "rediss://"]
+
+# Placeholders that will be substituted at runtime are not credentials. Every
+# pattern is fully anchored so a real password that merely *contains* `$` or
+# `%` is still caught.
+[[rules.allowlists]]
+description = "The password group is a template placeholder (${VAR}, $VAR, $(cmd), %s, <password>, {{ .Values.x }}), not a literal."
+regexTarget = "secret"
+regexes = [
+  '''^\$\{[^}]*\}$''',
+  '''^\$[A-Za-z_][A-Za-z0-9_]*$''',
+  '''^\$\([^)]*\)$''',
+  '''^%[#+\-0-9.]*[a-zA-Z]$''',
+  '''^<[^>]*>$''',
+  '''^\{\{[^}]*\}\}$''',
+]
+
+# k3s join/secure token: `K10<sha256 of the cluster CA>::<user>:<password>`.
+# Anyone holding it can join a node to the cluster or, for the server token,
+# read the datastore. It appears in cloud-init, bootstrap scripts and runbooks,
+# exactly the files this repo is made of.
+[[rules]]
+id = "basecamp-k3s-token"
+description = "k3s cluster join/secure token"
+regex = '''\bK10[0-9a-f]{64}::[A-Za-z0-9_.\-]+:[A-Za-z0-9]{6,}'''
+keywords = ["k10"]
+
+# Tailscale auth/API/OAuth-client keys: `tskey-<kind>-<id>-<secret>`. The admin
+# access path (tailnet) is joined with these.
+[[rules]]
+id = "basecamp-tailscale-key"
+description = "Tailscale auth, API or OAuth client key"
+regex = '''\btskey-[a-z]+-[A-Za-z0-9]{6,}-[A-Za-z0-9]{16,}'''
+keywords = ["tskey-"]
+
+# Cloudflare Tunnel run token: base64 of `{"a":"<account>","t":"<tunnel>","s":"<secret>"}`,
+# so it always starts `eyJhIjoi`. The bundled rules only catch it when it is
+# assigned to a name containing "token"; this catches it wherever it sits (a
+# bare YAML value, an args list, a log line). Whoever holds it can serve
+# traffic as any public hostname routed to the tunnel.
+[[rules]]
+id = "basecamp-cloudflare-tunnel-token"
+description = "Cloudflare Tunnel run token"
+regex = '''\beyJhIjoi[A-Za-z0-9+/]{60,}={0,2}'''
+keywords = ["eyjhijoi"]
+
+# ---------------------------------------------------------------------------
+# Allowlist
+#
+# Every entry must be scoped to a specific VALUE with a written reason, never
+# to a path. A path exclusion switches the scanner off in exactly the file
+# where someone pastes a real value "for five minutes". Empty today.
+# ---------------------------------------------------------------------------
