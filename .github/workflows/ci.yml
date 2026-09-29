@@ -40,6 +40,18 @@ jobs:
       - name: gitleaks (full history)
         run: ./scripts/gitleaks.sh git --no-banner --redact --verbose .
 
+  # Plants fake credentials of every shape this repo handles and asserts which
+  # rule catches each, so a rule that silently stops firing (an upstream rename,
+  # a broken regex) fails here instead of turning the scan above into a no-op.
+  gitleaks-rules:
+    name: gitleaks-rules
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: gitleaks rule regression test
+        run: ./scripts/test-gitleaks-rules.py
+
   terraform-fmt:
     name: terraform-fmt
     runs-on: ubuntu-latest
@@ -61,7 +73,7 @@ jobs:
   # `failure` or `cancelled` fail it.
   ci:
     name: ci
-    needs: [secret-scan, terraform-fmt]
+    needs: [secret-scan, gitleaks-rules, terraform-fmt]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

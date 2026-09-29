@@ -1,0 +1,25 @@
+# Dependabot version updates. CI pins third-party actions to a commit SHA, which
+# is right for supply-chain safety and means they never move on their own; this
+# is what moves them.
+#
+# Terraform providers are added in the same PR as the first Terraform root
+# module (#4). Pointing Dependabot at directories that hold no manifests yet
+# just produces "dependency file not found" errors in the Dependabot tab.
+#
+# Security updates (PRs raised off an advisory) are a separate repo setting and
+# are enabled.
+
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      actions:
+        patterns: ["*"]
